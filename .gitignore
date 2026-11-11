@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# 系统
+.DS_Store
+.workbuddy/
+# 数据文件：缺失时由 data_loader 通过 kagglehub 自动下载。
+# 若希望仓库自带数据可直接运行，删掉下面一行。
+credit_info.csv
+

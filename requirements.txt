@@ -1,0 +1,12 @@
+# 运行看板与测试所需依赖
+pandas>=2.0
+numpy>=1.24
+plotly>=5.18
+dash>=2.14
+lifelines>=0.27
+
+# 数据缺失时从 Kaggle 自动下载（data_loader）
+kagglehub>=0.2
+
+# 测试
+pytest>=7.4
