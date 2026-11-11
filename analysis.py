@@ -14,6 +14,15 @@ _VINTAGE_COLS = ["ID", "open_month", "month_on_book", "window"]
 # 可选组合极少（vintage 3×61、roll 7、km 3×61），但每次调用都要扫 104 万行。
 # 用 lru_cache 把结果留在进程内：切 table tab、来回拨滑块、切换逾期维度时直接命中。
 #
+# lru_cache（Least Recently Used）语义：以「函数 + 全部入参」为键做备忘录——
+#   - 同一组参数再次调用时直接返回缓存值，函数体不再执行；
+#   - maxsize=N 表示最多保留 N 份不同参数组合的结果；
+#   - 超出上限时淘汰「最久未被使用」的那份（所以叫 LRU）。
+# maxsize 取值依据：vintage/KM 的理论组合是 3 due × 61 窗口 = 183 份，但用户实际
+# 不会遍历所有组合，64 份足够覆盖来回拖滑块的热区，且每份 vintage 结果约
+# 61×61 float 三张表，满载 < 5MB；roll 只有 7 个 mob 选项，16 绰绰有余；
+# CDF 无参数，单值即可（maxsize=1）。
+#
 # 两条硬性约束：
 #   1. 缓存里存的是同一个对象引用，公开入口**必须**返回 .copy()，
 #      否则某个回调原地改一列就会永久污染缓存（和 tmp 被 cummax 回写是同一类事故）。
@@ -23,15 +32,19 @@ _VINTAGE_COLS = ["ID", "open_month", "month_on_book", "window"]
 
 # %%
 # ─── Vintage table ───────────────────────────────────────────────────────────
+# maxsize=64：键为 (due, min_window)，理论组合 3×61=183，64 份覆盖滑块热区且满载 <5MB
 @lru_cache(maxsize=64)
 def _filter_vintage_table(due, min_window):
     # 复制一份工作副本再加工，tmp 保持原样（due 列在 tmp 里始终是未累计的逐月标记）
     work = tmp[_VINTAGE_COLS + [due]].copy()
 
     # Cumulative max per ID: once overdue, always counted as overdue from that point forward
-    work[due] = (
-        work.sort_values(by="month_on_book", ascending=True).groupby("ID")[due].cummax()
-    )
+    # 排序与 cummax 在同一对象上进行，让「按账龄升序累计」的语义在代码里自解释。
+    # 赋值按索引标签对齐，前提是索引标签唯一（tmp 来自 read_csv 的默认 RangeIndex，
+    # 取列子集后不变）；切勿改成 .values/.to_numpy()——那会丢标签按位置错位，
+    # 把排序后的值塞回未排序的行。
+    work = work.sort_values(by="month_on_book", ascending=True)
+    work[due] = work.groupby("ID")[due].cummax()
 
     # Denominator: pivot of unique ID counts per (open_month, month_on_book)
     # 直接用 work 里的 open_month / month_on_book / window，不再回 credit_info 重算一遍
@@ -75,6 +88,7 @@ def filter_vintage_table(due="due30", min_window=0):
 
 # %%
 # ─── Backward Roll Rate ──────────────────────────────────────────────────────
+# maxsize=16：键为 mob，下拉可选 ALL + mob>=5 共 8 项，16 份已远超需求
 @lru_cache(maxsize=16)
 def _back_roll_rate(mob):
     all_statuses = sorted(tmp["STATUS"].unique().tolist())
@@ -136,6 +150,7 @@ def back_roll_rate(mob):
 
 # %%
 # ─── Observe Window CDF ──────────────────────────────────────────────────────
+# maxsize=1：无参数，全项目只有一份结果，单值缓存足够
 @lru_cache(maxsize=1)
 def _observe_window_cdf():
     unique_ids = tmp.drop_duplicates(subset="ID")
@@ -156,6 +171,7 @@ def observe_window_cdf():
 
 # %%
 # ─── Survival Analysis (Kaplan-Meier) ────────────────────────────────────────
+# maxsize=64：键为 (due, min_window)，与 vintage 同构，取值依据见文件头「缓存约定」
 @lru_cache(maxsize=64)
 def _survival_curve(due, min_window):
     # Filter by window length

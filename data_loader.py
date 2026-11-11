@@ -56,9 +56,6 @@ tmp = credit_info.assign(
     due60=lambda x: np.where(x.STATUS.isin(["X", "C", "0", "1"]), 0, 1),
 )
 
-# 这里曾有一份 credit_info.pivot(ID x MONTHS_BALANCE) 的 pivot_tb，
-# 45,985 x 61 的 object 矩阵，全项目无人引用，已删除。
-
 MAX_WINDOW = int(tmp["window"].max())
 ALL_MOBS = sorted(tmp["month_on_book"].unique().tolist())
 print(
